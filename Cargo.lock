@@ -3269,8 +3269,7 @@ dependencies = [
 [[package]]
 name = "msvc-demangler"
 version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbeff6bd154a309b2ada5639b2661ca6ae4599b34e8487dc276d2cd637da2d76"
+source = "git+https://github.com/hsreina/msvc-demangler-rust?branch=fix%2Fvc71-decorations#a2e9cf261e0c1d90462eccf030333112a681c16f"
 dependencies = [
  "bitflags 2.13.0",
  "itoa",

@@ -30,3 +30,8 @@ codegen-units = 1
 [profile.release-min]
 inherits = "release-lto"
 opt-level = "z"
+
+# Visual C++ 7.1 decorations msvc-demangler 0.11.0 rejects (const enum template
+# arguments, variable addresses, local static destructor helpers).
+[patch.crates-io]
+msvc-demangler = { git = "https://github.com/hsreina/msvc-demangler-rust", branch = "fix/vc71-decorations" }
