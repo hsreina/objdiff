@@ -299,10 +299,16 @@ fn reloc_eq(
     let relax_reloc_diffs = diff_config.function_reloc_diffs == FunctionRelocDiffs::None;
     let (left_reloc, right_reloc) = match (left_ins.relocation, right_ins.relocation) {
         (Some(left_reloc), Some(right_reloc)) => (left_reloc, right_reloc),
-        // If relocations are relaxed, match if left is missing a reloc
-        (None, Some(_)) => return relax_reloc_diffs,
+        // A relocation that only the linker resolves may face its resolved constant
+        (Some(left_reloc), None) => {
+            return left_obj.arch.reloc_matches_constant(left_reloc.relocation.flags);
+        }
+        (None, Some(right_reloc)) => {
+            // If relocations are relaxed, match if left is missing a reloc
+            return relax_reloc_diffs
+                || right_obj.arch.reloc_matches_constant(right_reloc.relocation.flags);
+        }
         (None, None) => return true,
-        _ => return false,
     };
     if left_reloc.relocation.flags != right_reloc.relocation.flags {
         return false;
@@ -366,13 +372,24 @@ fn arg_eq(
             InstructionArg::Value(r) => l.loose_eq(r),
             // If relocations are relaxed, match if left is a constant and right is a reloc
             // Useful for instances where the target object is created without relocations
-            InstructionArg::Reloc => diff_config.function_reloc_diffs == FunctionRelocDiffs::None,
+            InstructionArg::Reloc => {
+                diff_config.function_reloc_diffs == FunctionRelocDiffs::None
+                    || right_ins.relocation.is_some_and(|r| {
+                        right_obj.arch.reloc_matches_constant(r.relocation.flags)
+                    })
+            }
             _ => false,
         },
-        InstructionArg::Reloc => {
-            matches!(right_arg, InstructionArg::Reloc)
-                && reloc_eq(left_obj, right_obj, left_ins, right_ins, diff_config)
-        }
+        InstructionArg::Reloc => match right_arg {
+            InstructionArg::Reloc => {
+                reloc_eq(left_obj, right_obj, left_ins, right_ins, diff_config)
+            }
+            // A relocation that only the linker resolves may face its resolved constant
+            InstructionArg::Value(_) => left_ins
+                .relocation
+                .is_some_and(|r| left_obj.arch.reloc_matches_constant(r.relocation.flags)),
+            _ => false,
+        },
         InstructionArg::BranchDest(_) => match right_arg {
             // Compare dest instruction idx after diffing
             InstructionArg::BranchDest(_) => {

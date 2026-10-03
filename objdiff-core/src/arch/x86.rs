@@ -6,7 +6,7 @@ use iced_x86::{
     Decoder, DecoderOptions, DecoratorKind, FormatterOutput, FormatterTextKind, GasFormatter,
     Instruction, IntelFormatter, MasmFormatter, NasmFormatter, NumberKind, OpKind, Register,
 };
-use object::{Endian as _, Object as _, ObjectSection as _, elf, pe};
+use object::{Endian as _, Object as _, ObjectSection as _, ObjectSymbol as _, elf, pe};
 
 use crate::{
     arch::{Arch, OPCODE_DATA, RelocationOverride, RelocationOverrideTarget},
@@ -63,8 +63,12 @@ impl ArchX86 {
         match self.arch {
             Architecture::X86 => match flags {
                 RelocationFlags::Coff(typ) => match typ {
-                    pe::IMAGE_REL_I386_DIR16 | pe::IMAGE_REL_I386_REL16 => Some(2),
-                    pe::IMAGE_REL_I386_DIR32 | pe::IMAGE_REL_I386_REL32 => Some(4),
+                    pe::IMAGE_REL_I386_DIR16
+                    | pe::IMAGE_REL_I386_REL16
+                    | pe::IMAGE_REL_I386_SECTION => Some(2),
+                    pe::IMAGE_REL_I386_DIR32
+                    | pe::IMAGE_REL_I386_REL32
+                    | pe::IMAGE_REL_I386_SECREL => Some(4),
                     _ => None,
                 },
                 RelocationFlags::Elf(typ) => match typ {
@@ -277,7 +281,7 @@ impl Arch for ArchX86 {
 
     fn relocation_override(
         &self,
-        _file: &object::File<'_>,
+        file: &object::File<'_>,
         section: &object::Section,
         address: u64,
         relocation: &object::Relocation,
@@ -285,10 +289,32 @@ impl Arch for ArchX86 {
         if !relocation.has_implicit_addend() {
             return Ok(None);
         }
+        // A relocation against a symbol that resolves to the absolute value 0 leaves the
+        // in-place value unchanged: drop it, so the instruction compares equal to one cut from a
+        // linked image, which has no relocation. MSVC's `__except_list` (read as `fs:[0]` by
+        // every SEH prologue) is undefined in the object and defined absolute 0 by the CRT.
+        if let object::RelocationTarget::Symbol(index) = relocation.target()
+            && let Ok(symbol) = file.symbol_by_index(index)
+            && ((symbol.section() == object::SymbolSection::Absolute && symbol.address() == 0)
+                || (symbol.is_undefined() && symbol.name() == Ok("__except_list")))
+            && matches!(relocation.flags(), object::RelocationFlags::Coff {
+                typ: pe::IMAGE_REL_I386_DIR32
+            })
+        {
+            return Ok(Some(RelocationOverride { target: RelocationOverrideTarget::Skip, addend: 0 }));
+        }
         let addend = match self.arch {
             Architecture::X86 => match relocation.flags() {
+                object::RelocationFlags::Coff { typ: pe::IMAGE_REL_I386_SECTION } => {
+                    let data =
+                        section.data()?[address as usize..address as usize + 2].try_into()?;
+                    self.endianness.read_u16(data) as i64
+                }
                 object::RelocationFlags::Coff {
-                    typ: pe::IMAGE_REL_I386_DIR32 | pe::IMAGE_REL_I386_REL32,
+                    typ:
+                        pe::IMAGE_REL_I386_DIR32
+                        | pe::IMAGE_REL_I386_REL32
+                        | pe::IMAGE_REL_I386_SECREL,
                 }
                 | object::RelocationFlags::Elf {
                     r_type:
@@ -340,6 +366,8 @@ impl Arch for ArchX86 {
                 RelocationFlags::Coff(typ) => match typ {
                     pe::IMAGE_REL_I386_DIR32 => Some("IMAGE_REL_I386_DIR32"),
                     pe::IMAGE_REL_I386_REL32 => Some("IMAGE_REL_I386_REL32"),
+                    pe::IMAGE_REL_I386_SECTION => Some("IMAGE_REL_I386_SECTION"),
+                    pe::IMAGE_REL_I386_SECREL => Some("IMAGE_REL_I386_SECREL"),
                     _ => None,
                 },
                 RelocationFlags::Elf(typ) => match typ {
@@ -369,6 +397,14 @@ impl Arch for ArchX86 {
                 _ => None,
             },
         }
+    }
+
+    fn reloc_matches_constant(&self, flags: RelocationFlags) -> bool {
+        matches!(
+            (&self.arch, flags),
+            (Architecture::X86, RelocationFlags::Coff(pe::IMAGE_REL_I386_SECREL))
+                | (Architecture::X86_64, RelocationFlags::Coff(pe::IMAGE_REL_AMD64_SECREL))
+        )
     }
 
     fn data_reloc_size(&self, flags: RelocationFlags) -> usize {
