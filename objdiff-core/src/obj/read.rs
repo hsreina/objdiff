@@ -142,6 +142,9 @@ fn map_symbol(
     if symbol.is_weak() {
         flags |= SymbolFlag::Weak;
     }
+    if symbol.section() == object::SymbolSection::Absolute {
+        flags |= SymbolFlag::Absolute;
+    }
     if file.format() == object::BinaryFormat::Elf
         && symbol.scope() == object::SymbolScope::Linkage
         && (file.architecture() != Architecture::Arm || !symbol.is_global())
@@ -163,7 +166,13 @@ fn map_symbol(
         object::SymbolKind::Section => SymbolKind::Section,
         _ => SymbolKind::Unknown,
     };
-    let address = arch.symbol_address(symbol.address(), kind);
+    let mut address = arch.symbol_address(symbol.address(), kind);
+    if symbol.is_undefined()
+        && let Some(value) = arch.known_absolute_symbol(&name)
+    {
+        flags |= SymbolFlag::Absolute;
+        address = value;
+    }
     let demangled_name = config.demangler.demangle(&name);
     // Find the alignment for the symbol if available
     let comment_sym = comment_syms.map(|vec| vec[symbol.index().0 - 1]);

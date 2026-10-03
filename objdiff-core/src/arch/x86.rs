@@ -399,6 +399,15 @@ impl Arch for ArchX86 {
         }
     }
 
+    fn known_absolute_symbol(&self, name: &str) -> Option<u64> {
+        // Defined absolute by the MSVC CRT; objects only reference them.
+        match (&self.arch, name) {
+            (Architecture::X86, "__except_list") => Some(0),
+            (Architecture::X86, "__tls_array") => Some(0x2c),
+            _ => None,
+        }
+    }
+
     fn reloc_matches_constant(&self, flags: RelocationFlags) -> bool {
         matches!(
             (&self.arch, flags),

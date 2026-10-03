@@ -460,6 +460,10 @@ pub trait Arch: Any + Debug + Send + Sync {
     /// knows; a target cut from a linked image carries that value as a constant instead.
     fn reloc_matches_constant(&self, _flags: RelocationFlags) -> bool { false }
 
+    /// The absolute value of an undefined symbol that the toolchain's runtime defines as an
+    /// absolute constant at link time (e.g. MSVC's `__tls_array`).
+    fn known_absolute_symbol(&self, _name: &str) -> Option<u64> { None }
+
     fn data_reloc_size(&self, flags: RelocationFlags) -> usize;
 
     fn symbol_address(&self, address: u64, _kind: SymbolKind) -> u64 { address }

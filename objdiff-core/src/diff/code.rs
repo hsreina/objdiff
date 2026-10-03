@@ -356,6 +356,16 @@ fn reloc_eq(
     }
 }
 
+/// A relocation to an absolute symbol (e.g. MSVC's `__tls_array`, 0x2c) resolves to the
+/// symbol's value plus addend; it matches the same value written as a constant.
+fn absolute_reloc_eq(reloc: ResolvedRelocation, value: &InstructionArgValue) -> bool {
+    reloc.symbol.flags.contains(SymbolFlag::Absolute)
+        && InstructionArgValue::Unsigned(
+            reloc.symbol.address.wrapping_add(reloc.relocation.addend as u64),
+        )
+        .loose_eq(value)
+}
+
 fn arg_eq(
     left_obj: &Object,
     right_obj: &Object,
@@ -376,6 +386,7 @@ fn arg_eq(
                 diff_config.function_reloc_diffs == FunctionRelocDiffs::None
                     || right_ins.relocation.is_some_and(|r| {
                         right_obj.arch.reloc_matches_constant(r.relocation.flags)
+                            || absolute_reloc_eq(r, l)
                     })
             }
             _ => false,
@@ -385,9 +396,10 @@ fn arg_eq(
                 reloc_eq(left_obj, right_obj, left_ins, right_ins, diff_config)
             }
             // A relocation that only the linker resolves may face its resolved constant
-            InstructionArg::Value(_) => left_ins
-                .relocation
-                .is_some_and(|r| left_obj.arch.reloc_matches_constant(r.relocation.flags)),
+            InstructionArg::Value(r) => left_ins.relocation.is_some_and(|l| {
+                left_obj.arch.reloc_matches_constant(l.relocation.flags)
+                    || absolute_reloc_eq(l, r)
+            }),
             _ => false,
         },
         InstructionArg::BranchDest(_) => match right_arg {

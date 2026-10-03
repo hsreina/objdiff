@@ -53,6 +53,8 @@ flags! {
         Ignored,
         /// Symbol name is compiler-generated; compare by value instead of name
         CompilerGenerated,
+        /// Symbol has an absolute value (its address) rather than a section location
+        Absolute,
     }
 }
 
